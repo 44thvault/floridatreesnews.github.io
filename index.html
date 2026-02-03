@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FLORIDA TREES NEWS 2026®</title>
+    <title>FLORIDA TREES NEWS</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -146,7 +146,7 @@ function renderNews(items) {
     const container = document.getElementById('news-container');
     container.innerHTML = items.map(item => `
         <div class="news-item">
-            <a href="${item.link}" target="_blank">${item.title}</a>
+            <a href="${item.link}" target="_blank" rel="noopener noreferrer">${item.title}</a>
             <div class="meta">
                 ${item.author || 'News'} •
                 ${new Date(item.pubDate).toLocaleDateString()}
