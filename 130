@@ -102,9 +102,10 @@
         }
 
         .project-links img {
-            width: 130px;
-            height: 130px;
+            width: 65px;
+            height: 65px;
             display: block;
+            object-fit: contain;
         }
 
         @media (max-width: 768px) {
