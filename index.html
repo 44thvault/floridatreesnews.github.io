@@ -72,6 +72,39 @@
             font-style: italic;
         }
 
+        .loading-spinner {
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .loading-spinner .dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+
+        @keyframes dots {
+            0%   { content: ''; }
+            25%  { content: '.'; }
+            50%  { content: '..'; }
+            75%  { content: '...'; }
+            100% { content: ''; }
+        }
+
+        .retry-btn {
+            font-family: 'Courier Prime', monospace;
+            background: #000;
+            color: #fff;
+            border: none;
+            padding: 10px 24px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 12px;
+        }
+
+        .retry-btn:hover {
+            background: #333;
+        }
+
         .footer {
             background: #000;
             color: #fff;
@@ -128,8 +161,8 @@
 </div>
 
 <div id="news-container">
-    <div class="news-item">
-        <a>Loading news…</a>
+    <div class="loading-spinner">
+        <a>Loading news<span class="dots"></span></a>
         <div class="meta">Please wait</div>
     </div>
 </div>
@@ -160,49 +193,123 @@ function updateTime() {
 updateTime();
 setInterval(updateTime, 60000);
 
+const RSS_FEED = 'https://news.google.com/rss/search?q=florida+marijuana+cannabis&hl=en-US&gl=US&ceid=US:en';
+
+/* ── Proxy strategies (tried in order) ── */
+
+async function tryRss2Json() {
+    const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(RSS_FEED)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`rss2json ${res.status}`);
+    const data = await res.json();
+    if (data.status !== 'ok' || !data.items?.length) throw new Error('rss2json empty');
+    return data.items.map(i => ({
+        title: i.title,
+        link: i.link,
+        author: i.author || '',
+        pubDate: i.pubDate
+    }));
+}
+
+async function tryAllOrigins() {
+    const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(RSS_FEED)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`allorigins ${res.status}`);
+    const text = await res.text();
+    return parseRSSXml(text);
+}
+
+async function tryCorsAnywhere() {
+    const url = `https://corsproxy.io/?${encodeURIComponent(RSS_FEED)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`corsproxy ${res.status}`);
+    const text = await res.text();
+    return parseRSSXml(text);
+}
+
+/* ── XML parser for raw RSS ── */
+function parseRSSXml(xmlText) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText, 'text/xml');
+    const items = doc.querySelectorAll('item');
+    if (!items.length) throw new Error('No items in RSS XML');
+    const results = [];
+    items.forEach(item => {
+        const title = item.querySelector('title')?.textContent || '';
+        const link = item.querySelector('link')?.textContent || '';
+        const pubDate = item.querySelector('pubDate')?.textContent || '';
+        const source = item.querySelector('source')?.textContent || '';
+        results.push({ title, link, author: source, pubDate });
+    });
+    return results;
+}
+
+/* ── Main fetch with fallback chain ── */
 async function fetchNews() {
-    try {
-        const rss = encodeURIComponent(
-            'https://news.google.com/rss/search?q=florida+marijuana+cannabis&hl=en-US&gl=US&ceid=US:en'
-        );
+    const strategies = [tryRss2Json, tryAllOrigins, tryCorsAnywhere];
+    let lastError;
 
-        const res = await fetch(
-            `https://api.rss2json.com/v1/api.json?rss_url=${rss}`
-        );
-
-        const data = await res.json();
-
-        if (!data.items || data.items.length === 0) {
-            showError('No news found.');
-            return;
+    for (const strategy of strategies) {
+        try {
+            const items = await strategy();
+            if (items && items.length > 0) {
+                renderNews(items.slice(0, 15));
+                return;
+            }
+        } catch (e) {
+            console.warn(`Proxy failed: ${e.message}`);
+            lastError = e;
         }
-
-        renderNews(data.items.slice(0, 15));
-    } catch (e) {
-        console.error(e);
-        showError('Failed to load news.');
     }
+
+    console.error('All proxies failed:', lastError);
+    showError('News temporarily unavailable. Tap retry.');
 }
 
 function renderNews(items) {
     const container = document.getElementById('news-container');
-    container.innerHTML = items.map(item => `
-        <div class="news-item">
-            <a href="${item.link}" target="_blank" rel="noopener noreferrer">${item.title}</a>
-            <div class="meta">
-                ${item.author || 'News'} •
-                ${new Date(item.pubDate).toLocaleDateString()}
+    container.innerHTML = items.map(item => {
+        const safeTitle = escapeHtml(item.title);
+        const safeAuthor = escapeHtml(item.author || 'News');
+        const safeLink = escapeHtml(item.link);
+        const dateStr = item.pubDate
+            ? new Date(item.pubDate).toLocaleDateString()
+            : '';
+        return `
+            <div class="news-item">
+                <a href="${safeLink}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>
+                <div class="meta">
+                    ${safeAuthor}${dateStr ? ' • ' + dateStr : ''}
+                </div>
             </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
+}
+
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
 }
 
 function showError(msg) {
     document.getElementById('news-container').innerHTML = `
-        <div class="news-item">
+        <div class="news-item" style="text-align:center;">
             <a style="color:red">${msg}</a>
+            <br>
+            <button class="retry-btn" onclick="retryNews()">Retry</button>
         </div>
     `;
+}
+
+function retryNews() {
+    document.getElementById('news-container').innerHTML = `
+        <div class="loading-spinner">
+            <a>Loading news<span class="dots"></span></a>
+            <div class="meta">Retrying...</div>
+        </div>
+    `;
+    fetchNews();
 }
 
 fetchNews();
