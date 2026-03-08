@@ -5,18 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FLORIDA TREES NEWS</title>
 
-    <!-- Preconnect to speed up external requests -->
-    <link rel="preconnect" href="https://api.rss2json.com">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
 
-    <!-- Fire the RSS fetch IMMEDIATELY, before page even renders -->
+    <!-- Prefetch news from our own API immediately -->
     <script>
-        const RSS_FEED = 'https://news.google.com/rss/search?q=florida+marijuana+cannabis&hl=en-US&gl=US&ceid=US:en';
-        const newsFetchPromise = fetch(
-            `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(RSS_FEED)}`
-        ).then(r => r.json());
+        const newsFetchPromise = fetch('/api/news').then(r => r.json());
     </script>
 
     <style>
@@ -185,28 +180,49 @@ function updateTime() {
 updateTime();
 setInterval(updateTime, 60000);
 
-/* ── Use the prefetched promise from <head> ── */
 async function fetchNews() {
     try {
+        // Try our own serverless API first (prefetched in <head>)
         const data = await newsFetchPromise;
 
-        if (!data.items || data.items.length === 0) {
-            showError('No news found.');
+        if (data.ok && data.items && data.items.length > 0) {
+            renderNews(data.items);
             return;
         }
-
-        renderNews(data.items.slice(0, 15));
     } catch (e) {
-        console.error(e);
-        showError('Failed to load news.');
+        console.warn('API route failed, trying fallback:', e);
     }
+
+    // Fallback: rss2json client-side
+    try {
+        const rss = encodeURIComponent(
+            'https://news.google.com/rss/search?q=florida+marijuana+cannabis&hl=en-US&gl=US&ceid=US:en'
+        );
+        const res = await fetch(
+            `https://api.rss2json.com/v1/api.json?rss_url=${rss}`
+        );
+        const data = await res.json();
+        if (data.status === 'ok' && data.items?.length) {
+            renderNews(data.items.slice(0, 15).map(i => ({
+                title: i.title,
+                link: i.link,
+                source: i.author || '',
+                pubDate: i.pubDate
+            })));
+            return;
+        }
+    } catch (e2) {
+        console.warn('Fallback also failed:', e2);
+    }
+
+    showError('News temporarily unavailable.');
 }
 
 function renderNews(items) {
     const container = document.getElementById('news-container');
     container.innerHTML = items.map(item => {
         const safeTitle = escapeHtml(item.title);
-        const safeAuthor = escapeHtml(item.author || 'News');
+        const safeSource = escapeHtml(item.source || item.author || 'News');
         const safeLink = escapeHtml(item.link);
         const dateStr = item.pubDate
             ? new Date(item.pubDate).toLocaleDateString()
@@ -215,7 +231,7 @@ function renderNews(items) {
             <div class="news-item">
                 <a href="${safeLink}" target="_blank" rel="noopener noreferrer">${safeTitle}</a>
                 <div class="meta">
-                    ${safeAuthor}${dateStr ? ' &bull; ' + dateStr : ''}
+                    ${safeSource}${dateStr ? ' &bull; ' + dateStr : ''}
                 </div>
             </div>
         `;
